@@ -5,7 +5,7 @@
     SETUP: put this in a LocalScript inside StarterPlayer > StarterPlayerScripts
 
     HOTKEYS
-      M          show / hide HUD
+      M / orb    collapse / expand the HUD (animated)
       P          play / pause
       N / B      next / previous track
       Up / Down  volume
@@ -368,7 +368,7 @@ local header = new("Frame", {
 	BackgroundTransparency = 1,
 }, main)
 label(header, "J.A.R.V.I.S. // AUDIO", UDim2.fromOffset(14, 0), UDim2.fromOffset(185, 34), 15)
-local clock = label(header, "00:00:00", UDim2.new(1, -150, 0, 0), UDim2.fromOffset(96, 34), 14, Enum.TextXAlignment.Right)
+local clock = label(header, "00:00:00", UDim2.new(1, -190, 0, 0), UDim2.fromOffset(96, 34), 14, Enum.TextXAlignment.Right)
 local divider = new("Frame", {
 	Position = UDim2.fromOffset(10, 34),
 	Size = UDim2.new(1, -20, 0, 1),
@@ -1167,6 +1167,188 @@ end
 refreshPlaylist()
 
 ----------------------------------------------------------------
+-- HUD TOGGLE ORB (collapse / expand with animation)
+----------------------------------------------------------------
+local ORB_POS = UDim2.new(1, -46, 1, -46)
+local uiOpen, uiBusy, booted = true, false, false
+local homePos = main.Position
+local pop = new("UIScale", { Scale = 1 }, main)
+
+local orb = new("TextButton", {
+	Name = "Orb",
+	Text = "",
+	AutoButtonColor = false,
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = ORB_POS,
+	Size = UDim2.fromOffset(60, 60),
+	BackgroundColor3 = Color3.fromRGB(4, 12, 20),
+	BackgroundTransparency = 0.15,
+	BorderSizePixel = 0,
+	Visible = false,
+}, gui)
+new("UICorner", { CornerRadius = UDim.new(1, 0) }, orb)
+acc(new("UIStroke", { Thickness = 2, Transparency = 0.2 }, orb), "Color")
+local orbScale = new("UIScale", { Scale = 0 }, orb)
+
+local orbRing = new("Frame", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1 }, orb)
+for i = 1, 12 do
+	local a = math.rad(i * 30)
+	local t = new("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Size = UDim2.fromOffset(2, 6),
+		Position = UDim2.new(0.5, 24 * math.sin(a), 0.5, -24 * math.cos(a)),
+		Rotation = i * 30,
+		BorderSizePixel = 0,
+	}, orbRing)
+	acc(t, "BackgroundColor3")
+end
+
+local orbMid = new("Frame", {
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.fromScale(0.5, 0.5),
+	Size = UDim2.fromOffset(32, 32),
+	BackgroundTransparency = 1,
+}, orb)
+new("UICorner", { CornerRadius = UDim.new(1, 0) }, orbMid)
+acc(new("UIStroke", { Thickness = 1.5, Transparency = 0.3 }, orbMid), "Color")
+
+local orbCore = new("Frame", {
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.fromScale(0.5, 0.5),
+	Size = UDim2.fromOffset(14, 14),
+	BackgroundColor3 = Color3.fromRGB(235, 252, 255),
+	BorderSizePixel = 0,
+}, orb)
+new("UICorner", { CornerRadius = UDim.new(1, 0) }, orbCore)
+acc(new("UIStroke", { Thickness = 3, Transparency = 0.15 }, orbCore), "Color")
+
+local orbTip = new("TextLabel", {
+	AnchorPoint = Vector2.new(1, 0.5),
+	Position = UDim2.new(0, -10, 0.5, 0),
+	Size = UDim2.fromOffset(90, 20),
+	BackgroundTransparency = 1,
+	Text = "HUD  [M]",
+	Font = Enum.Font.Code,
+	TextSize = 13,
+	TextXAlignment = Enum.TextXAlignment.Right,
+	TextTransparency = 1,
+}, orb)
+acc(orbTip, "TextColor3")
+
+local boost = 0
+
+local function ripple()
+	local r = new("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = ORB_POS,
+		Size = UDim2.fromOffset(60, 60),
+		BackgroundTransparency = 1,
+	}, gui)
+	new("UICorner", { CornerRadius = UDim.new(1, 0) }, r)
+	local st = new("UIStroke", { Thickness = 3, Color = accent, Transparency = 0.1 }, r)
+	TweenService:Create(r, TweenInfo.new(0.7, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		Size = UDim2.fromOffset(260, 260),
+	}):Play()
+	TweenService:Create(st, TweenInfo.new(0.7), { Transparency = 1, Thickness = 0.5 }):Play()
+	task.delay(0.8, function()
+		r:Destroy()
+	end)
+end
+
+local function flicker()
+	for _, v in ipairs({ 0.55, 0, 0.4, 0, 0.2, 0 }) do
+		if not (alive and uiOpen) then
+			return
+		end
+		main.GroupTransparency = v
+		task.wait(0.035)
+	end
+end
+
+local function setUI(open)
+	if uiBusy or not booted or open == uiOpen then
+		return
+	end
+	uiBusy = true
+	uiOpen = open
+	boost = 700
+	ripple()
+
+	if open then
+		main.Position = ORB_POS
+		pop.Scale = 0.05
+		main.GroupTransparency = 1
+		main.Visible = true
+		TweenService:Create(main, TweenInfo.new(0.6, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+			Position = homePos,
+		}):Play()
+		TweenService:Create(pop, TweenInfo.new(0.6, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+			Scale = 1,
+		}):Play()
+		TweenService:Create(main, TweenInfo.new(0.3, Enum.EasingStyle.Quad), { GroupTransparency = 0 }):Play()
+		task.delay(0.6, function()
+			flicker()
+			uiBusy = false
+		end)
+	else
+		homePos = main.Position
+		TweenService:Create(main, TweenInfo.new(0.45, Enum.EasingStyle.Quint, Enum.EasingDirection.In), {
+			Position = ORB_POS,
+		}):Play()
+		TweenService:Create(pop, TweenInfo.new(0.45, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
+			Scale = 0.05,
+		}):Play()
+		TweenService:Create(main, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+			GroupTransparency = 1,
+		}):Play()
+		notify("HUD minimized. Press M or tap the orb to restore.", "info", 2.5)
+		task.delay(0.47, function()
+			main.Visible = false
+			pop.Scale = 1
+			uiBusy = false
+		end)
+	end
+end
+
+local function toggleUI()
+	setUI(not uiOpen)
+end
+
+local function revealOrb()
+	orb.Visible = true
+	TweenService:Create(orbScale, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+	ripple()
+end
+
+orb.MouseButton1Click:Connect(toggleUI)
+orb.MouseEnter:Connect(function()
+	TweenService:Create(orbScale, TweenInfo.new(0.15), { Scale = 1.15 }):Play()
+	TweenService:Create(orbTip, TweenInfo.new(0.15), { TextTransparency = 0 }):Play()
+end)
+orb.MouseLeave:Connect(function()
+	TweenService:Create(orbScale, TweenInfo.new(0.15), { Scale = 1 }):Play()
+	TweenService:Create(orbTip, TweenInfo.new(0.15), { TextTransparency = 1 }):Play()
+end)
+
+track(RunService.RenderStepped:Connect(function(dt)
+	if not orb.Visible then
+		return
+	end
+	local norm = sound.IsPlaying and math.clamp(sound.PlaybackLoudness / 450, 0, 1) or 0
+	boost = math.max(0, boost - dt * 900)
+	orbRing.Rotation += dt * (40 + norm * 120 + boost)
+	local sz = 14 + norm * 10 + math.sin(os.clock() * 3)
+	orbCore.Size = UDim2.fromOffset(sz, sz)
+end))
+
+-- minimize button in the header
+do
+	local mb = button(header, "-", UDim2.new(1, -50, 0, 17), UDim2.fromOffset(34, 22), toggleUI)
+	mb.AnchorPoint = Vector2.new(1, 0.5)
+	mb.TextSize = 18
+end
+
+----------------------------------------------------------------
 -- HOTKEYS
 ----------------------------------------------------------------
 track(UserInputService.InputBegan:Connect(function(input, processed)
@@ -1175,7 +1357,7 @@ track(UserInputService.InputBegan:Connect(function(input, processed)
 	end
 	local k = input.KeyCode
 	if k == Enum.KeyCode.M then
-		main.Visible = not main.Visible
+		toggleUI()
 	elseif k == Enum.KeyCode.P then
 		togglePlay()
 	elseif k == Enum.KeyCode.N then
@@ -1192,8 +1374,10 @@ track(UserInputService.InputBegan:Connect(function(input, processed)
 		themeBtn.Text = "SUIT: " .. THEMES[n][1]
 	notify("Suit configuration: " .. THEMES[n][1], "info", 2)
 	elseif k == Enum.KeyCode.F then
+		setUI(true)
 		showPage("files")
 	elseif k == Enum.KeyCode.C then
+		setUI(true)
 		showPage("credits")
 	elseif k == Enum.KeyCode.Delete then
 		unload()
@@ -1310,6 +1494,8 @@ task.spawn(function()
 	end
 	TweenService:Create(boot, TweenInfo.new(0.4), { TextTransparency = 1 }):Play()
 	TweenService:Create(main, TweenInfo.new(0.6), { GroupTransparency = 0 }):Play()
+	booted = true
+	revealOrb()
 	task.wait(0.5)
 	boot:Destroy()
 	if not alive then
