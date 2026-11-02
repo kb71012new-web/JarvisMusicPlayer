@@ -12,8 +12,8 @@
       T          cycle suit theme
       F          open FILES import panel
       C          open CREDITS
-      K / L / Y  KEYS, PLAYERS and LAB tabs
-      (every key can be rebound in the KEYS tab)
+      K / L / Y / J  KEYS, PLAYERS, LAB and FUN tabs
+      (every key can be rebound in the KEYS tab; Backspace = None)
       Delete     EXIT (or click the red X) - fully unloads the script
 
     ADDING MUSIC (type into the box and press ADD or Enter)
@@ -74,17 +74,27 @@ local function acc(obj, prop)
 	return obj
 end
 
-local function setTheme(i)
-	themeIndex = i
-	accent = THEMES[i][2]
-	local live = {}
-	for _, a in ipairs(accented) do
-		if a[1]:IsDescendantOf(game) then
+local function applyAccent(c, prune)
+	accent = c
+	if prune then
+		local live = {}
+		for _, a in ipairs(accented) do
+			if a[1]:IsDescendantOf(game) then
+				a[1][a[2]] = accent
+				table.insert(live, a)
+			end
+		end
+		accented = live
+	else
+		for _, a in ipairs(accented) do
 			a[1][a[2]] = accent
-			table.insert(live, a)
 		end
 	end
-	accented = live
+end
+
+local function setTheme(i)
+	themeIndex = i
+	applyAccent(THEMES[i][2], true)
 end
 
 local function fmt(t)
@@ -761,6 +771,7 @@ local BIND_LIST = {
 	{ "keys", "Open KEYS tab", Enum.KeyCode.K },
 	{ "players", "Open PLAYERS tab", Enum.KeyCode.L },
 	{ "lab", "Open LAB tab", Enum.KeyCode.Y },
+	{ "fun", "Open FUN tab", Enum.KeyCode.J },
 	{ "credits", "Open CREDITS tab", Enum.KeyCode.C },
 	{ "exit", "Exit / unload script", Enum.KeyCode.Delete },
 }
@@ -1019,7 +1030,7 @@ do
 	line("REQUESTED BY", 116, 11, C, true)
 	line(player.DisplayName .. "  (@" .. player.Name .. ")", 130, 16)
 	line("MODULES", 160, 11, C, true)
-	line("ARC REACTOR  |  VISUALIZER  |  FILE BROWSER  |  KEYBINDS  |  PLAYER SCANNER  |  LAB + RADAR  |  NOTIFICATION CORE  |  SUIT THEMES", 174, 12, C, false, 34)
+	line("ARC REACTOR  |  VISUALIZER  |  FILE BROWSER  |  KEYBINDS  |  PLAYER SCANNER  |  LAB + RADAR  |  FUN ZONE  |  NOTIFICATION CORE  |  SUIT THEMES", 174, 12, C, false, 34)
 	line("HOTKEYS", 214, 11, C, true)
 	line("Open the KEYS tab to view or rebind every shortcut.", 228, 12, C, false, 34)
 	line("powered by 100% fictional arc reactor technology.", 280, 11, C, true)
@@ -1032,6 +1043,7 @@ do
 	local pageKeys = new("Frame", { Position = PAGE_POS, Size = PAGE_SIZE, BackgroundTransparency = 1, Visible = false }, overlay)
 	local pagePlayers = new("Frame", { Position = PAGE_POS, Size = PAGE_SIZE, BackgroundTransparency = 1, Visible = false }, overlay)
 	local pageLab = new("Frame", { Position = PAGE_POS, Size = PAGE_SIZE, BackgroundTransparency = 1, Visible = false }, overlay)
+	local pageFun = new("Frame", { Position = PAGE_POS, Size = PAGE_SIZE, BackgroundTransparency = 1, Visible = false }, overlay)
 	onOpen.files = function()
 		scanPath(currentDir)
 	end
@@ -1040,7 +1052,7 @@ do
 	-- KEYBINDS PAGE
 	------------------------------------------------------------
 	label(pageKeys, "// KEYBINDS", UDim2.fromOffset(12, 8), UDim2.fromOffset(300, 20), 16)
-	label(pageKeys, "Click a key, then press the new one. ESC cancels. Swapping is automatic.", UDim2.fromOffset(12, 30), UDim2.fromOffset(476, 16), 12).TextTransparency = 0.25
+	label(pageKeys, "Click a key, then press the new one. ESC cancels. BACKSPACE = None.", UDim2.fromOffset(12, 30), UDim2.fromOffset(476, 16), 12).TextTransparency = 0.25
 
 	local keyList = new("ScrollingFrame", {
 		Position = UDim2.fromOffset(12, 54),
@@ -1074,7 +1086,7 @@ do
 				kb.Text = "[ PRESS KEY ]"
 				kb.BackgroundColor3 = Color3.fromRGB(90, 70, 10)
 			else
-				kb.Text = binds[id].Name
+				kb.Text = (binds[id] == Enum.KeyCode.Unknown) and "NONE" or binds[id].Name
 				kb.BackgroundColor3 = DARK
 			end
 		end
@@ -1090,6 +1102,13 @@ do
 			rebindTarget = nil
 			refreshKeys()
 			notify("Rebind cancelled.", "warn", 1.5)
+			return
+		end
+		if k == Enum.KeyCode.Backspace then
+			binds[id] = Enum.KeyCode.Unknown
+			rebindTarget = nil
+			refreshKeys()
+			notify(BIND_LABEL[id] .. " unbound (None).", "warn", 2)
 			return
 		end
 		if k == Enum.KeyCode.Unknown then
@@ -1666,6 +1685,248 @@ do
 	end
 
 	------------------------------------------------------------
+	-- FUN PAGE
+	------------------------------------------------------------
+	label(pageFun, "// FUN ZONE", UDim2.fromOffset(12, 8), UDim2.fromOffset(200, 20), 16)
+
+	-- PARTY MODE: rainbow HUD that speeds up with the music
+	local party = false
+	local partyHue = 0
+	local partyBtn
+	local function setParty(on)
+		party = on
+		partyBtn.Text = on and "PARTY MODE: ON" or "PARTY MODE: OFF"
+		partyBtn.BackgroundColor3 = on and ON or DARK
+		if not on then
+			applyAccent(THEMES[themeIndex][2], true)
+		end
+		notify(on and "Party mode engaged. Let's make some noise, sir." or "Party mode disengaged.", on and "ok" or "info", 2.5)
+	end
+	partyBtn = button(pageFun, "PARTY MODE: OFF", UDim2.fromOffset(14, 34), UDim2.fromOffset(226, 28), function()
+		setParty(not party)
+	end)
+	partyBtn.TextSize = 13
+	table.insert(cleanupFns, function()
+		party = false
+	end)
+	local partyAcc, partyTick = 0, 0
+	track(RunService.Heartbeat:Connect(function(dt)
+		if not party then
+			return
+		end
+		local norm = sound.IsPlaying and math.clamp(sound.PlaybackLoudness / 450, 0, 1) or 0
+		partyHue = (partyHue + dt * (0.06 + norm * 0.5)) % 1
+		partyAcc += dt
+		if partyAcc < 0.05 then
+			return
+		end
+		partyAcc = 0
+		partyTick += 1
+		applyAccent(Color3.fromHSV(partyHue, 0.75, 1), partyTick % 40 == 0)
+	end))
+
+	-- SUIT-UP SEQUENCE
+	local suiting = false
+	button(pageFun, "SUIT-UP SEQUENCE", UDim2.fromOffset(14, 68), UDim2.fromOffset(226, 28), function()
+		if suiting then
+			return
+		end
+		suiting = true
+		task.spawn(function()
+			setCinema(true)
+			setTint(true)
+			setTheme(2)
+			themeBtn.Text = "SUIT: " .. THEMES[2][1]
+			local steps = {
+				"Helmet locked.",
+				"Gauntlets online.",
+				"Repulsors charged.",
+				"Arc reactor at 100%.",
+				"Suit ready. Shall we, sir?",
+			}
+			for i, t in ipairs(steps) do
+				if not alive then
+					return
+				end
+				notify(t, i == #steps and "ok" or "info", 1.6)
+				task.wait(0.9)
+			end
+			task.wait(1.5)
+			if alive then
+				setCinema(false)
+				setTint(false)
+			end
+			suiting = false
+		end)
+	end).TextSize = 13
+
+	-- ASK J.A.R.V.I.S.
+	local ANSWERS = {
+		"Absolutely, sir.",
+		"I wouldn't bet the suit on it.",
+		"The odds are in your favor.",
+		"Calculations say no, sir.",
+		"Ask again after a coffee.",
+		"Yes. Though I advise caution.",
+		"I'd call that highly unlikely.",
+		"Without a doubt.",
+		"My sensors are inconclusive.",
+		"I have seen worse ideas. Not many.",
+		"Affirmative. Brace for impact.",
+		"Outlook uncertain. Reactor stable.",
+		"Negative. Might I suggest a nap?",
+		"Of course. I've already started.",
+	}
+	label(pageFun, "ASK J.A.R.V.I.S.", UDim2.fromOffset(14, 106), UDim2.fromOffset(226, 14), 12).TextTransparency = 0.3
+	local askBox = new("TextBox", {
+		Position = UDim2.fromOffset(14, 124),
+		Size = UDim2.fromOffset(168, 26),
+		BackgroundColor3 = DARK,
+		BackgroundTransparency = 0.3,
+		BorderSizePixel = 0,
+		Font = Enum.Font.Code,
+		TextSize = 12,
+		Text = "",
+		PlaceholderText = "ask a yes/no question",
+		PlaceholderColor3 = Color3.fromRGB(110, 140, 155),
+		ClearTextOnFocus = false,
+		TextXAlignment = L,
+	}, pageFun)
+	new("UIPadding", { PaddingLeft = UDim.new(0, 8) }, askBox)
+	acc(askBox, "TextColor3")
+	acc(new("UIStroke", { Thickness = 1, Transparency = 0.5 }, askBox), "Color")
+	local answerL = label(pageFun, "", UDim2.fromOffset(14, 156), UDim2.fromOffset(226, 56), 12)
+	answerL.TextWrapped = true
+	answerL.TextTruncate = Enum.TextTruncate.None
+	answerL.TextYAlignment = Enum.TextYAlignment.Top
+	local askToken = 0
+	local function ask()
+		if askBox.Text:gsub("%s", "") == "" then
+			notify("You have to ask something first, sir.", "warn", 2)
+			return
+		end
+		askToken += 1
+		local my = askToken
+		local ans = ANSWERS[math.random(#ANSWERS)]
+		task.spawn(function()
+			for i = 1, #ans do
+				if my ~= askToken or not alive then
+					return
+				end
+				answerL.Text = "> " .. ans:sub(1, i) .. "_"
+				task.wait(0.02)
+			end
+			answerL.Text = "> " .. ans
+		end)
+	end
+	askBox.FocusLost:Connect(function(enter)
+		if enter then
+			ask()
+		end
+	end)
+	button(pageFun, "ASK", UDim2.fromOffset(188, 124), UDim2.fromOffset(52, 26), ask).TextSize = 12
+
+	-- COIN + D20
+	local rollL = label(pageFun, "", UDim2.fromOffset(14, 268), UDim2.fromOffset(226, 16), 13)
+	button(pageFun, "FLIP COIN", UDim2.fromOffset(14, 232), UDim2.fromOffset(106, 28), function()
+		rollL.Text = "Coin: " .. (math.random(2) == 1 and "HEADS" or "TAILS")
+	end).TextSize = 12
+	button(pageFun, "ROLL D20", UDim2.fromOffset(134, 232), UDim2.fromOffset(106, 28), function()
+		local n = math.random(20)
+		if n == 20 then
+			rollL.Text = "D20: 20  (critical hit!)"
+			notify("Natural 20. The universe approves, sir.", "ok", 2.5)
+		elseif n == 1 then
+			rollL.Text = "D20: 1  (ouch)"
+			notify("A natural 1. Ouch.", "warn", 2.5)
+		else
+			rollL.Text = "D20: " .. n
+		end
+	end).TextSize = 12
+
+	-- REPULSOR RANGE: 20-second target practice
+	local AREA_W, AREA_H = 232, 190
+	label(pageFun, "REPULSOR RANGE", UDim2.fromOffset(256, 34), UDim2.fromOffset(232, 16), 12).TextTransparency = 0.3
+	local statL = label(pageFun, "SCORE 0   TIME 20.0   BEST 0", UDim2.fromOffset(256, 52), UDim2.fromOffset(232, 16), 12)
+	local playArea = new("Frame", {
+		Position = UDim2.fromOffset(256, 72),
+		Size = UDim2.fromOffset(AREA_W, AREA_H),
+		BackgroundColor3 = Color3.fromRGB(2, 8, 12),
+		BackgroundTransparency = 0.2,
+		BorderSizePixel = 0,
+		ClipsDescendants = true,
+	}, pageFun)
+	acc(new("UIStroke", { Thickness = 1.5, Transparency = 0.3 }, playArea), "Color")
+	local hint = label(playArea, "press START", UDim2.new(), UDim2.fromScale(1, 1), 13, Enum.TextXAlignment.Center)
+	hint.TextTransparency = 0.4
+
+	local target = new("TextButton", {
+		Text = "",
+		AutoButtonColor = false,
+		Size = UDim2.fromOffset(38, 38),
+		BackgroundColor3 = Color3.fromRGB(235, 252, 255),
+		BorderSizePixel = 0,
+		Visible = false,
+	}, playArea)
+	new("UICorner", { CornerRadius = UDim.new(1, 0) }, target)
+	acc(new("UIStroke", { Thickness = 4 }, target), "Color")
+
+	local playing, score, best, timeLeft, gameToken = false, 0, 0, 20, 0
+	local function updateStats()
+		statL.Text = string.format("SCORE %d   TIME %.1f   BEST %d", score, math.max(timeLeft, 0), best)
+	end
+	local function moveTarget()
+		local sz = math.max(20, 38 - score)
+		target.Size = UDim2.fromOffset(sz, sz)
+		target.Position = UDim2.fromOffset(math.random(0, AREA_W - sz), math.random(0, AREA_H - sz))
+	end
+	target.MouseButton1Click:Connect(function()
+		if playing then
+			score += 1
+			updateStats()
+			moveTarget()
+		end
+	end)
+
+	local startBtn
+	startBtn = button(pageFun, "START", UDim2.fromOffset(256, 268), UDim2.fromOffset(232, 28), function()
+		if playing then
+			return
+		end
+		gameToken += 1
+		local my = gameToken
+		playing, score, timeLeft = true, 0, 20
+		hint.Visible = false
+		target.Visible = true
+		moveTarget()
+		updateStats()
+		startBtn.Text = "GO GO GO"
+		task.spawn(function()
+			while timeLeft > 0 and my == gameToken and alive do
+				task.wait(0.1)
+				timeLeft -= 0.1
+				updateStats()
+			end
+			if my ~= gameToken or not alive then
+				return
+			end
+			playing = false
+			target.Visible = false
+			hint.Visible = true
+			hint.Text = "final score: " .. score
+			startBtn.Text = "START"
+			if score > best then
+				best = score
+				updateStats()
+				notify("New record: " .. score .. " hits. Impressive, sir.", "ok", 3)
+			else
+				notify("Range closed. Score: " .. score .. ".", "info", 2.5)
+			end
+		end)
+	end)
+	startBtn.TextSize = 13
+
+	------------------------------------------------------------
 	-- ONE UPDATE LOOP FOR THE NEW TABS
 	------------------------------------------------------------
 	local tPlayers, tServer = 0, 0
@@ -1700,7 +1961,7 @@ do
 	------------------------------------------------------------
 	-- PAGE SWITCHING + HEADER BUTTONS
 	------------------------------------------------------------
-	local pages = { files = pageFiles, keys = pageKeys, players = pagePlayers, lab = pageLab, credits = pageCredits }
+	local pages = { files = pageFiles, keys = pageKeys, players = pagePlayers, lab = pageLab, fun = pageFun, credits = pageCredits }
 	local tabButtons = {}
 	local lastPage = "files"
 
@@ -1740,10 +2001,11 @@ do
 		{ "keys", "KEYS" },
 		{ "players", "PLAYERS" },
 		{ "lab", "LAB" },
+		{ "fun", "FUN" },
 		{ "credits", "CREDITS" },
 	}
 	for i, t in ipairs(TABS) do
-		local tb = button(overlay, t[2], UDim2.fromOffset(8 + (i - 1) * 90, 6), UDim2.fromOffset(86, 24), function()
+		local tb = button(overlay, t[2], UDim2.fromOffset(8 + (i - 1) * 72, 6), UDim2.fromOffset(68, 24), function()
 			showPage(t[1], true)
 		end)
 		tb.TextSize = 12
@@ -2130,7 +2392,7 @@ local function openTab(name)
 	setUI(true)
 	showPage(name)
 end
-for _, name in ipairs({ "files", "keys", "players", "lab", "credits" }) do
+for _, name in ipairs({ "files", "keys", "players", "lab", "fun", "credits" }) do
 	actions[name] = function()
 		openTab(name)
 	end
@@ -2149,7 +2411,7 @@ track(UserInputService.InputBegan:Connect(function(input, processed)
 		return
 	end
 	for id, key in pairs(binds) do
-		if key == input.KeyCode then
+		if key ~= Enum.KeyCode.Unknown and key == input.KeyCode then
 			local fn = actions[id]
 			if fn then
 				fn()
