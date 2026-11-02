@@ -12,6 +12,8 @@
       T          cycle suit theme
       F          open FILES import panel
       C          open CREDITS
+      K / L / Y  KEYS, PLAYERS and LAB tabs
+      (every key can be rebound in the KEYS tab)
       Delete     EXIT (or click the red X) - fully unloads the script
 
     ADDING MUSIC (type into the box and press ADD or Enter)
@@ -75,11 +77,14 @@ end
 local function setTheme(i)
 	themeIndex = i
 	accent = THEMES[i][2]
+	local live = {}
 	for _, a in ipairs(accented) do
-		if a[1].Parent then
+		if a[1]:IsDescendantOf(game) then
 			a[1][a[2]] = accent
+			table.insert(live, a)
 		end
 	end
+	accented = live
 end
 
 local function fmt(t)
@@ -96,6 +101,7 @@ local function track(c)
 	table.insert(conns, c)
 	return c
 end
+local cleanupFns = {} -- functions run on EXIT
 local unload -- defined once the sound exists
 
 ----------------------------------------------------------------
@@ -266,6 +272,18 @@ new("UIListLayout", {
 	SortOrder = Enum.SortOrder.LayoutOrder,
 }, notifHolder)
 
+local notifLog = {}
+local onLogged
+local function logLine(text)
+	table.insert(notifLog, os.date("%H:%M:%S") .. "  " .. text)
+	if #notifLog > 40 then
+		table.remove(notifLog, 1)
+	end
+	if onLogged then
+		onLogged()
+	end
+end
+
 local toasts, toastOrder = {}, 0
 local KIND_COLORS = {
 	ok = Color3.fromRGB(90, 255, 150),
@@ -280,6 +298,7 @@ local function notify(text, kind, duration)
 	duration = duration or 3.5
 	local col = KIND_COLORS[kind] or accent
 	text = text:sub(1, 1):upper() .. text:sub(2)
+	logLine(text)
 	toastOrder += 1
 
 	local slot = new("Frame", {
@@ -499,6 +518,8 @@ local msgToken = 0
 local function say(text, kind)
 	if kind then
 		notify(text, kind)
+	else
+		logLine(text)
 	end
 	msgToken += 1
 	local my = msgToken
@@ -677,6 +698,9 @@ function unload()
 	alive = false
 	msgToken += 1
 	loadToken += 1
+	for _, f in ipairs(cleanupFns) do
+		pcall(f)
+	end
 	pcall(function()
 		sound:Stop()
 	end)
@@ -723,12 +747,35 @@ do
 	exit.MouseButton1Click:Connect(unload)
 end
 
-local showPage -- "files" | "credits"
+local showPage -- "files" | "keys" | "players" | "lab" | "credits"
+
+local BIND_LIST = {
+	{ "toggle", "Collapse / expand HUD", Enum.KeyCode.M },
+	{ "play", "Play / pause", Enum.KeyCode.P },
+	{ "next", "Next track", Enum.KeyCode.N },
+	{ "prev", "Previous track", Enum.KeyCode.B },
+	{ "volup", "Volume up", Enum.KeyCode.Up },
+	{ "voldown", "Volume down", Enum.KeyCode.Down },
+	{ "theme", "Cycle suit theme", Enum.KeyCode.T },
+	{ "files", "Open FILES tab", Enum.KeyCode.F },
+	{ "keys", "Open KEYS tab", Enum.KeyCode.K },
+	{ "players", "Open PLAYERS tab", Enum.KeyCode.L },
+	{ "lab", "Open LAB tab", Enum.KeyCode.Y },
+	{ "credits", "Open CREDITS tab", Enum.KeyCode.C },
+	{ "exit", "Exit / unload script", Enum.KeyCode.Delete },
+}
+local BIND_LABEL, binds = {}, {}
+for _, b in ipairs(BIND_LIST) do
+	BIND_LABEL[b[1]] = b[2]
+	binds[b[1]] = b[3]
+end
+local rebindTarget = nil
+local captureKey, refreshKeys
 
 do
 	local overlay = new("Frame", {
-		Position = UDim2.fromOffset(10, 40),
-		Size = UDim2.new(1, -20, 1, -50),
+		Position = UDim2.fromOffset(10, 38),
+		Size = UDim2.new(1, -20, 1, -46),
 		BackgroundColor3 = Color3.fromRGB(4, 12, 20),
 		BackgroundTransparency = 0.02,
 		BorderSizePixel = 0,
@@ -737,8 +784,8 @@ do
 	}, main)
 	acc(new("UIStroke", { Thickness = 1, Transparency = 0.5 }, overlay), "Color")
 
-	local pageFiles = new("Frame", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Visible = false }, overlay)
-	local pageCredits = new("Frame", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Visible = false }, overlay)
+	local pageFiles = new("Frame", { Position = UDim2.fromOffset(0, 34), Size = UDim2.new(1, 0, 1, -34), BackgroundTransparency = 1, Visible = false }, overlay)
+	local pageCredits = new("Frame", { Position = UDim2.fromOffset(0, 34), Size = UDim2.new(1, 0, 1, -34), BackgroundTransparency = 1, Visible = false }, overlay)
 	local openPage = nil
 
 	local L = Enum.TextXAlignment.Left
@@ -942,7 +989,6 @@ do
 			end
 		end
 	end)
-	label(pageFiles, "tip: files live in your executor's workspace folder", UDim2.fromOffset(12, 330), UDim2.fromOffset(380, 16), 11).TextTransparency = 0.45
 
 	------------------------------------------------------------
 	-- CREDITS PAGE
@@ -973,44 +1019,752 @@ do
 	line("REQUESTED BY", 116, 11, C, true)
 	line(player.DisplayName .. "  (@" .. player.Name .. ")", 130, 16)
 	line("MODULES", 160, 11, C, true)
-	line("ARC REACTOR  |  VISUALIZER  |  FILE BROWSER  |  NOTIFICATION CORE  |  SUIT THEMES", 174, 12, C, false, 34)
+	line("ARC REACTOR  |  VISUALIZER  |  FILE BROWSER  |  KEYBINDS  |  PLAYER SCANNER  |  LAB + RADAR  |  NOTIFICATION CORE  |  SUIT THEMES", 174, 12, C, false, 34)
 	line("HOTKEYS", 214, 11, C, true)
-	line("M hide  |  P play  |  N / B next / prev  |  Up / Down volume  |  T theme  |  F files  |  C credits  |  Delete exit", 228, 12, C, false, 34)
+	line("Open the KEYS tab to view or rebind every shortcut.", 228, 12, C, false, 34)
 	line("powered by 100% fictional arc reactor technology.", 280, 11, C, true)
+
+	------------------------------------------------------------
+	-- KEYS / PLAYERS / LAB PAGES
+	------------------------------------------------------------
+	local onOpen = {}
+	local PAGE_POS, PAGE_SIZE = UDim2.fromOffset(0, 34), UDim2.new(1, 0, 1, -34)
+	local pageKeys = new("Frame", { Position = PAGE_POS, Size = PAGE_SIZE, BackgroundTransparency = 1, Visible = false }, overlay)
+	local pagePlayers = new("Frame", { Position = PAGE_POS, Size = PAGE_SIZE, BackgroundTransparency = 1, Visible = false }, overlay)
+	local pageLab = new("Frame", { Position = PAGE_POS, Size = PAGE_SIZE, BackgroundTransparency = 1, Visible = false }, overlay)
+	onOpen.files = function()
+		scanPath(currentDir)
+	end
+
+	------------------------------------------------------------
+	-- KEYBINDS PAGE
+	------------------------------------------------------------
+	label(pageKeys, "// KEYBINDS", UDim2.fromOffset(12, 8), UDim2.fromOffset(300, 20), 16)
+	label(pageKeys, "Click a key, then press the new one. ESC cancels. Swapping is automatic.", UDim2.fromOffset(12, 30), UDim2.fromOffset(476, 16), 12).TextTransparency = 0.25
+
+	local keyList = new("ScrollingFrame", {
+		Position = UDim2.fromOffset(12, 54),
+		Size = UDim2.fromOffset(476, 232),
+		BackgroundColor3 = DARK,
+		BackgroundTransparency = 0.5,
+		BorderSizePixel = 0,
+		ScrollBarThickness = 3,
+		CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+	}, pageKeys)
+	acc(new("UIStroke", { Thickness = 1, Transparency = 0.6 }, keyList), "Color")
+	new("UIListLayout", { Padding = UDim.new(0, 2) }, keyList)
+
+	local keyButtons = {}
+	for i, b in ipairs(BIND_LIST) do
+		local row = new("Frame", { Size = UDim2.new(1, -6, 0, 26), BackgroundTransparency = 1, LayoutOrder = i }, keyList)
+		label(row, b[2], UDim2.fromOffset(8, 0), UDim2.new(1, -160, 1, 0), 13)
+		local kb = button(row, "", UDim2.new(1, -140, 0, 2), UDim2.fromOffset(132, 22), function()
+			rebindTarget = b[1]
+			refreshKeys()
+			notify("Press a key for: " .. b[2], "info", 2)
+		end)
+		kb.TextSize = 12
+		keyButtons[b[1]] = kb
+	end
+
+	function refreshKeys()
+		for id, kb in pairs(keyButtons) do
+			if rebindTarget == id then
+				kb.Text = "[ PRESS KEY ]"
+				kb.BackgroundColor3 = Color3.fromRGB(90, 70, 10)
+			else
+				kb.Text = binds[id].Name
+				kb.BackgroundColor3 = DARK
+			end
+		end
+	end
+	onOpen.keys = refreshKeys
+
+	function captureKey(k)
+		local id = rebindTarget
+		if not id then
+			return
+		end
+		if k == Enum.KeyCode.Escape then
+			rebindTarget = nil
+			refreshKeys()
+			notify("Rebind cancelled.", "warn", 1.5)
+			return
+		end
+		if k == Enum.KeyCode.Unknown then
+			return
+		end
+		for other, key in pairs(binds) do
+			if other ~= id and key == k then
+				binds[other] = binds[id] -- swap so nothing ends up unbound
+				break
+			end
+		end
+		binds[id] = k
+		rebindTarget = nil
+		refreshKeys()
+		notify(BIND_LABEL[id] .. " -> " .. k.Name, "ok", 2)
+	end
+
+	button(pageKeys, "RESET DEFAULTS", UDim2.fromOffset(12, 294), UDim2.fromOffset(150, 28), function()
+		for _, b in ipairs(BIND_LIST) do
+			binds[b[1]] = b[3]
+		end
+		rebindTarget = nil
+		refreshKeys()
+		notify("Keybinds restored to defaults.", "ok", 2)
+	end)
+	refreshKeys()
+
+	------------------------------------------------------------
+	-- PLAYERS PAGE
+	------------------------------------------------------------
+	local selected = nil
+	local filterText = ""
+
+	local searchBox = new("TextBox", {
+		Position = UDim2.fromOffset(10, 8),
+		Size = UDim2.fromOffset(170, 24),
+		BackgroundColor3 = DARK,
+		BackgroundTransparency = 0.3,
+		BorderSizePixel = 0,
+		Font = Enum.Font.Code,
+		TextSize = 12,
+		Text = "",
+		PlaceholderText = "search players",
+		PlaceholderColor3 = Color3.fromRGB(110, 140, 155),
+		ClearTextOnFocus = false,
+		TextXAlignment = L,
+	}, pagePlayers)
+	new("UIPadding", { PaddingLeft = UDim.new(0, 8) }, searchBox)
+	acc(searchBox, "TextColor3")
+	acc(new("UIStroke", { Thickness = 1, Transparency = 0.5 }, searchBox), "Color")
+
+	local plist = new("ScrollingFrame", {
+		Position = UDim2.fromOffset(10, 38),
+		Size = UDim2.fromOffset(170, 286),
+		BackgroundColor3 = DARK,
+		BackgroundTransparency = 0.5,
+		BorderSizePixel = 0,
+		ScrollBarThickness = 3,
+		CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+	}, pagePlayers)
+	acc(new("UIStroke", { Thickness = 1, Transparency = 0.6 }, plist), "Color")
+	new("UIListLayout", { Padding = UDim.new(0, 2) }, plist)
+
+	local avatar = new("ImageLabel", {
+		Position = UDim2.fromOffset(192, 8),
+		Size = UDim2.fromOffset(96, 96),
+		BackgroundColor3 = DARK,
+		BackgroundTransparency = 0.3,
+		BorderSizePixel = 0,
+	}, pagePlayers)
+	acc(new("UIStroke", { Thickness = 1.5, Transparency = 0.3 }, avatar), "Color")
+
+	local pName = label(pagePlayers, "SELECT A PLAYER", UDim2.fromOffset(296, 8), UDim2.fromOffset(194, 24), 17)
+	local pUser = label(pagePlayers, "", UDim2.fromOffset(296, 32), UDim2.fromOffset(194, 16), 12)
+	pUser.TextTransparency = 0.35
+	local hpBack = new("Frame", {
+		Position = UDim2.fromOffset(296, 58),
+		Size = UDim2.fromOffset(194, 8),
+		BackgroundColor3 = Color3.fromRGB(20, 40, 55),
+		BorderSizePixel = 0,
+	}, pagePlayers)
+	local hpFill = new("Frame", { Size = UDim2.fromScale(0, 1), BackgroundColor3 = Color3.fromRGB(90, 255, 150), BorderSizePixel = 0 }, hpBack)
+	local hpText = label(pagePlayers, "", UDim2.fromOffset(296, 70), UDim2.fromOffset(194, 16), 12)
+
+	local ROW_KEYS = { "USER ID", "ACCOUNT AGE", "MEMBERSHIP", "TEAM", "WALKSPEED", "JUMP", "POSITION", "DISTANCE", "STATS" }
+	local rowVals = {}
+	for i, k in ipairs(ROW_KEYS) do
+		local y = 116 + (i - 1) * 19
+		label(pagePlayers, k, UDim2.fromOffset(192, y), UDim2.fromOffset(100, 18), 12).TextTransparency = 0.4
+		rowVals[k] = label(pagePlayers, "--", UDim2.fromOffset(296, y), UDim2.fromOffset(194, 18), 12)
+	end
+
+	local function charParts(p)
+		local char = p and p.Character
+		if not char then
+			return nil, nil
+		end
+		return char:FindFirstChildOfClass("Humanoid"), char:FindFirstChild("HumanoidRootPart")
+	end
+
+	local function updateDetails()
+		local p = selected
+		if not p or not p.Parent then
+			pName.Text = p and "PLAYER LEFT" or "SELECT A PLAYER"
+			pUser.Text = ""
+			hpText.Text = ""
+			hpFill.Size = UDim2.fromScale(0, 1)
+			for _, k in ipairs(ROW_KEYS) do
+				rowVals[k].Text = "--"
+			end
+			return
+		end
+		pName.Text = p.DisplayName .. (p == player and " (you)" or "")
+		pUser.Text = "@" .. p.Name
+		rowVals["USER ID"].Text = tostring(p.UserId)
+		rowVals["ACCOUNT AGE"].Text = p.AccountAge .. " days"
+		rowVals["MEMBERSHIP"].Text = p.MembershipType.Name
+		rowVals["TEAM"].Text = p.Team and p.Team.Name or "None"
+
+		local hum, root = charParts(p)
+		if hum then
+			local frac = math.clamp(hum.Health / math.max(hum.MaxHealth, 1), 0, 1)
+			hpFill.Size = UDim2.fromScale(frac, 1)
+			hpFill.BackgroundColor3 = Color3.fromRGB(255, 70, 70):Lerp(Color3.fromRGB(90, 255, 150), frac)
+			hpText.Text = string.format("HP  %d / %d", math.floor(hum.Health), math.floor(hum.MaxHealth))
+			rowVals["WALKSPEED"].Text = string.format("%.1f", hum.WalkSpeed)
+			rowVals["JUMP"].Text = hum.UseJumpPower and string.format("power %.1f", hum.JumpPower) or string.format("height %.1f", hum.JumpHeight)
+		else
+			hpFill.Size = UDim2.fromScale(0, 1)
+			hpText.Text = "no character"
+			rowVals["WALKSPEED"].Text = "--"
+			rowVals["JUMP"].Text = "--"
+		end
+
+		if root then
+			local pos = root.Position
+			rowVals["POSITION"].Text = string.format("%d, %d, %d", pos.X, pos.Y, pos.Z)
+			local _, myRoot = charParts(player)
+			if p == player then
+				rowVals["DISTANCE"].Text = "-- (you)"
+			elseif myRoot then
+				rowVals["DISTANCE"].Text = string.format("%.0f studs", (pos - myRoot.Position).Magnitude)
+			else
+				rowVals["DISTANCE"].Text = "--"
+			end
+		else
+			rowVals["POSITION"].Text = "--"
+			rowVals["DISTANCE"].Text = "--"
+		end
+
+		local ls = p:FindFirstChild("leaderstats")
+		if ls then
+			local parts = {}
+			for _, v in ipairs(ls:GetChildren()) do
+				if #parts < 3 and v:IsA("ValueBase") then
+					table.insert(parts, v.Name .. ": " .. tostring(v.Value))
+				end
+			end
+			rowVals["STATS"].Text = #parts > 0 and table.concat(parts, ", ") or "none"
+		else
+			rowVals["STATS"].Text = "none"
+		end
+	end
+
+	local avatarToken = 0
+	local function loadAvatar(p)
+		avatarToken += 1
+		local my = avatarToken
+		avatar.Image = ""
+		task.spawn(function()
+			local ok, content = pcall(function()
+				return Players:GetUserThumbnailAsync(p.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size100x100)
+			end)
+			if ok and alive and my == avatarToken then
+				avatar.Image = content
+			end
+		end)
+	end
+
+	local refreshList
+	local function pick(p)
+		selected = p
+		refreshList()
+		loadAvatar(p)
+		updateDetails()
+	end
+
+	function refreshList()
+		for _, c in ipairs(plist:GetChildren()) do
+			if c:IsA("TextButton") then
+				c:Destroy()
+			end
+		end
+		local all = Players:GetPlayers()
+		table.sort(all, function(a, b)
+			return a.DisplayName:lower() < b.DisplayName:lower()
+		end)
+		local f = filterText:lower()
+		for i, p in ipairs(all) do
+			if f == "" or p.DisplayName:lower():find(f, 1, true) or p.Name:lower():find(f, 1, true) then
+				local b = new("TextButton", {
+					Size = UDim2.new(1, -6, 0, 24),
+					LayoutOrder = i,
+					BackgroundColor3 = Color3.fromRGB(25, 70, 95),
+					BackgroundTransparency = (p == selected) and 0.3 or 0.85,
+					BorderSizePixel = 0,
+					Text = "  " .. p.DisplayName .. (p == player and " *" or ""),
+					Font = Enum.Font.Code,
+					TextSize = 13,
+					TextXAlignment = L,
+					TextTruncate = Enum.TextTruncate.AtEnd,
+					AutoButtonColor = false,
+				}, plist)
+				acc(b, "TextColor3")
+				b.MouseButton1Click:Connect(function()
+					pick(p)
+				end)
+			end
+		end
+	end
+
+	searchBox:GetPropertyChangedSignal("Text"):Connect(function()
+		filterText = searchBox.Text
+		refreshList()
+	end)
+	track(Players.PlayerAdded:Connect(function()
+		if pagePlayers.Visible then
+			refreshList()
+		end
+	end))
+	track(Players.PlayerRemoving:Connect(function()
+		task.defer(function()
+			if alive and pagePlayers.Visible then
+				refreshList()
+			end
+		end)
+	end))
+
+	onOpen.players = function()
+		if not selected then
+			pick(player)
+		else
+			refreshList()
+			updateDetails()
+		end
+	end
+
+	-- spectate (local camera only) + clipboard helpers
+	local spectating = nil
+	local specBtn
+	local function stopSpec()
+		if not spectating then
+			return
+		end
+		spectating = nil
+		local cam = workspace.CurrentCamera
+		local hum = charParts(player)
+		if cam and hum then
+			cam.CameraSubject = hum
+		end
+		if specBtn then
+			specBtn.Text = "SPECTATE"
+		end
+	end
+	table.insert(cleanupFns, stopSpec)
+
+	specBtn = button(pagePlayers, "SPECTATE", UDim2.fromOffset(192, 296), UDim2.fromOffset(98, 28), function()
+		if spectating then
+			stopSpec()
+			notify("Camera restored.", "ok", 2)
+			return
+		end
+		local p = selected
+		if not p or p == player then
+			notify("Pick another player first.", "warn", 2)
+			return
+		end
+		local hum = charParts(p)
+		local cam = workspace.CurrentCamera
+		if not (hum and cam) then
+			notify("That player has no character to follow.", "warn", 2)
+			return
+		end
+		cam.CameraSubject = hum
+		spectating = p
+		specBtn.Text = "STOP SPEC"
+		notify("Spectating " .. p.DisplayName, "ok", 2)
+	end)
+	specBtn.TextSize = 12
+
+	local setclip = env.setclipboard or env.toclipboard
+	local function copy(text, what)
+		if setclip and selected then
+			pcall(setclip, text)
+			notify("Copied " .. what .. ".", "ok", 2)
+		else
+			notify("Clipboard isn't available here.", "warn", 2)
+		end
+	end
+	button(pagePlayers, "COPY ID", UDim2.fromOffset(296, 296), UDim2.fromOffset(94, 28), function()
+		if selected then
+			copy(tostring(selected.UserId), "user ID")
+		end
+	end).TextSize = 12
+	button(pagePlayers, "COPY NAME", UDim2.fromOffset(396, 296), UDim2.fromOffset(94, 28), function()
+		if selected then
+			copy(selected.Name, "username")
+		end
+	end).TextSize = 12
+
+	------------------------------------------------------------
+	-- LAB PAGE (radar, camera / lighting toys, server info, log)
+	------------------------------------------------------------
+	local Lighting = game:GetService("Lighting")
+	local RADAR_SIZE, RADAR_RANGE = 150, 120
+	local sessionStart = os.clock()
+
+	label(pageLab, "// LAB", UDim2.fromOffset(12, 8), UDim2.fromOffset(200, 20), 16)
+
+	local radar = new("Frame", {
+		Position = UDim2.fromOffset(14, 34),
+		Size = UDim2.fromOffset(RADAR_SIZE, RADAR_SIZE),
+		BackgroundColor3 = Color3.fromRGB(4, 20, 30),
+		BackgroundTransparency = 0.2,
+		BorderSizePixel = 0,
+	}, pageLab)
+	new("UICorner", { CornerRadius = UDim.new(1, 0) }, radar)
+	acc(new("UIStroke", { Thickness = 2, Transparency = 0.2 }, radar), "Color")
+	for _, f in ipairs({ 0.33, 0.66 }) do
+		local r = new("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.fromScale(0.5, 0.5),
+			Size = UDim2.fromOffset(RADAR_SIZE * f, RADAR_SIZE * f),
+			BackgroundTransparency = 1,
+		}, radar)
+		new("UICorner", { CornerRadius = UDim.new(1, 0) }, r)
+		acc(new("UIStroke", { Thickness = 1, Transparency = 0.75 }, r), "Color")
+	end
+	local hLine = new("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.new(1, 0, 0, 1), BackgroundTransparency = 0.75, BorderSizePixel = 0 }, radar)
+	local vLine = new("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.new(0, 1, 1, 0), BackgroundTransparency = 0.75, BorderSizePixel = 0 }, radar)
+	acc(hLine, "BackgroundColor3")
+	acc(vLine, "BackgroundColor3")
+	local sweep = new("Frame", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1 }, radar)
+	local sweepLine = new("Frame", { Position = UDim2.new(0.5, -1, 0, 0), Size = UDim2.new(0, 2, 0.5, 0), BackgroundTransparency = 0.35, BorderSizePixel = 0 }, sweep)
+	acc(sweepLine, "BackgroundColor3")
+	local me = new("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(7, 7),
+		BackgroundColor3 = Color3.fromRGB(240, 255, 255),
+		BorderSizePixel = 0,
+	}, radar)
+	new("UICorner", { CornerRadius = UDim.new(1, 0) }, me)
+
+	local dots = {}
+	for i = 1, 24 do
+		local d = new("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Size = UDim2.fromOffset(6, 6),
+			BackgroundColor3 = Color3.fromRGB(255, 160, 60),
+			BorderSizePixel = 0,
+			Visible = false,
+		}, radar)
+		new("UICorner", { CornerRadius = UDim.new(1, 0) }, d)
+		dots[i] = d
+	end
+	local contactsL = label(pageLab, "CONTACTS: 0", UDim2.fromOffset(14, 188), UDim2.fromOffset(160, 14), 12)
+
+	local function updateRadar(dt)
+		sweep.Rotation = (os.clock() * 110) % 360
+		local cam = workspace.CurrentCamera
+		local _, myRoot = charParts(player)
+		local n, inRange = 0, 0
+		if cam and myRoot then
+			for _, p in ipairs(Players:GetPlayers()) do
+				if p ~= player and n < #dots then
+					local _, r = charParts(p)
+					if r then
+						n += 1
+						local rel = cam.CFrame:VectorToObjectSpace(r.Position - myRoot.Position)
+						local x, y = rel.X, rel.Z
+						local dist = math.sqrt(x * x + y * y)
+						local k = dist > 0 and (math.min(dist, RADAR_RANGE) / RADAR_RANGE) * (RADAR_SIZE / 2 - 6) / dist or 0
+						local d = dots[n]
+						d.Position = UDim2.fromOffset(RADAR_SIZE / 2 + x * k, RADAR_SIZE / 2 + y * k)
+						d.BackgroundTransparency = dist > RADAR_RANGE and 0.65 or 0
+						d.Visible = true
+						if dist <= RADAR_RANGE then
+							inRange += 1
+						end
+					end
+				end
+			end
+		end
+		for i = n + 1, #dots do
+			dots[i].Visible = false
+		end
+		contactsL.Text = string.format("CONTACTS: %d  (%d st)", inRange, RADAR_RANGE)
+	end
+
+	-- camera / lighting toys
+	local cam0 = workspace.CurrentCamera
+	local origFov = cam0 and cam0.FieldOfView or 70
+	local origClock = Lighting.ClockTime
+	local fovChanged, clockChanged = false, false
+	local cinema, tintOn = false, false
+	local bars, tint = {}, nil
+	local cinemaBtn, tintBtn
+	local ON = Color3.fromRGB(30, 80, 110)
+
+	label(pageLab, "FIELD OF VIEW", UDim2.fromOffset(180, 34), UDim2.fromOffset(160, 16), 12)
+	local fovVal = label(pageLab, string.format("%d", origFov), UDim2.fromOffset(380, 34), UDim2.fromOffset(100, 16), 12, Enum.TextXAlignment.Right)
+	local fovSlider = slider(pageLab, UDim2.fromOffset(180, 56), UDim2.fromOffset(300, 4), math.clamp((origFov - 30) / 90, 0, 1), function(a)
+		local c = workspace.CurrentCamera
+		if c then
+			fovChanged = true
+			c.FieldOfView = 30 + a * 90
+			fovVal.Text = string.format("%d", 30 + a * 90)
+		end
+	end)
+
+	label(pageLab, "TIME OF DAY (local)", UDim2.fromOffset(180, 70), UDim2.fromOffset(160, 16), 12)
+	local function clockText(h)
+		return string.format("%02d:%02d", math.floor(h) % 24, math.floor((h % 1) * 60))
+	end
+	local timeVal = label(pageLab, clockText(origClock), UDim2.fromOffset(380, 70), UDim2.fromOffset(100, 16), 12, Enum.TextXAlignment.Right)
+	local timeSlider = slider(pageLab, UDim2.fromOffset(180, 92), UDim2.fromOffset(300, 4), origClock / 24, function(a)
+		clockChanged = true
+		Lighting.ClockTime = a * 24
+		timeVal.Text = clockText(a * 24)
+	end)
+
+	local function setCinema(on)
+		cinema = on
+		if not bars.top then
+			for _, which in ipairs({ "top", "bot" }) do
+				local isBot = (which == "bot")
+				bars[which] = new("Frame", {
+					BackgroundColor3 = Color3.new(0, 0, 0),
+					BorderSizePixel = 0,
+					AnchorPoint = Vector2.new(0, isBot and 1 or 0),
+					Position = UDim2.fromScale(0, isBot and 1 or 0),
+					Size = UDim2.new(1, 0, 0, 0),
+					ZIndex = 0,
+				}, gui)
+			end
+		end
+		for _, f in pairs(bars) do
+			TweenService:Create(f, TweenInfo.new(0.6, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+				Size = UDim2.new(1, 0, on and 0.12 or 0, 0),
+			}):Play()
+		end
+		if cinemaBtn then
+			cinemaBtn.BackgroundColor3 = on and ON or DARK
+		end
+	end
+
+	local function setTint(on)
+		tintOn = on
+		if on and not tint then
+			tint = Instance.new("ColorCorrectionEffect")
+			tint.Name = "JarvisTint"
+			tint.Parent = Lighting
+		end
+		if tint then
+			tint.TintColor = Color3.new(1, 1, 1):Lerp(accent, 0.2)
+			tint.Saturation = 0.12
+			tint.Contrast = 0.06
+			tint.Enabled = on
+		end
+		if tintBtn then
+			tintBtn.BackgroundColor3 = on and ON or DARK
+		end
+	end
+
+	local function resetLab()
+		setCinema(false)
+		setTint(false)
+		local c = workspace.CurrentCamera
+		if c and fovChanged then
+			c.FieldOfView = origFov
+		end
+		if clockChanged then
+			Lighting.ClockTime = origClock
+		end
+		fovChanged, clockChanged = false, false
+		fovSlider.force(math.clamp((origFov - 30) / 90, 0, 1))
+		timeSlider.force(origClock / 24)
+		fovVal.Text = string.format("%d", origFov)
+		timeVal.Text = clockText(origClock)
+	end
+	table.insert(cleanupFns, function()
+		local c = workspace.CurrentCamera
+		if c and fovChanged then
+			c.FieldOfView = origFov
+		end
+		if clockChanged then
+			Lighting.ClockTime = origClock
+		end
+		if tint then
+			tint:Destroy()
+		end
+		for _, f in pairs(bars) do
+			f:Destroy()
+		end
+	end)
+
+	cinemaBtn = button(pageLab, "CINEMA", UDim2.fromOffset(180, 108), UDim2.fromOffset(96, 24), function()
+		setCinema(not cinema)
+	end)
+	tintBtn = button(pageLab, "SUIT TINT", UDim2.fromOffset(282, 108), UDim2.fromOffset(96, 24), function()
+		setTint(not tintOn)
+	end)
+	local resetBtn = button(pageLab, "RESET ALL", UDim2.fromOffset(384, 108), UDim2.fromOffset(96, 24), resetLab)
+	cinemaBtn.TextSize, tintBtn.TextSize, resetBtn.TextSize = 12, 12, 12
+
+	-- server info
+	local SERVER_KEYS = { "PLACE ID", "JOB ID", "PLAYERS", "SERVER TIME", "SESSION" }
+	local serverVals = {}
+	for i, k in ipairs(SERVER_KEYS) do
+		local y = 140 + (i - 1) * 17
+		label(pageLab, k, UDim2.fromOffset(180, y), UDim2.fromOffset(92, 16), 12).TextTransparency = 0.4
+		serverVals[k] = label(pageLab, "--", UDim2.fromOffset(274, y), UDim2.fromOffset(210, 16), 12)
+	end
+	local function fmtLong(t)
+		t = math.floor(t)
+		return string.format("%d:%02d:%02d", t // 3600, (t % 3600) // 60, t % 60)
+	end
+	local function updateServer()
+		serverVals["PLACE ID"].Text = tostring(game.PlaceId)
+		serverVals["JOB ID"].Text = game.JobId ~= "" and (game.JobId:sub(1, 12) .. "...") or "studio / none"
+		serverVals["PLAYERS"].Text = #Players:GetPlayers() .. " / " .. Players.MaxPlayers
+		serverVals["SERVER TIME"].Text = fmtLong(workspace.DistributedGameTime)
+		serverVals["SESSION"].Text = fmtLong(os.clock() - sessionStart)
+	end
+
+	-- system log (mirrors every JARVIS message)
+	label(pageLab, "// SYSTEM LOG", UDim2.fromOffset(14, 230), UDim2.fromOffset(200, 16), 11).TextTransparency = 0.4
+	local logBox = new("ScrollingFrame", {
+		Position = UDim2.fromOffset(14, 248),
+		Size = UDim2.fromOffset(472, 76),
+		BackgroundColor3 = Color3.fromRGB(2, 8, 12),
+		BackgroundTransparency = 0.2,
+		BorderSizePixel = 0,
+		ScrollBarThickness = 3,
+		CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+	}, pageLab)
+	acc(new("UIStroke", { Thickness = 1, Transparency = 0.6 }, logBox), "Color")
+	new("UIListLayout", {}, logBox)
+	local function renderLog()
+		for _, c in ipairs(logBox:GetChildren()) do
+			if c:IsA("TextLabel") then
+				c:Destroy()
+			end
+		end
+		for i = math.max(1, #notifLog - 14), #notifLog do
+			local l = label(logBox, notifLog[i], UDim2.new(), UDim2.new(1, -8, 0, 14), 11)
+			l.LayoutOrder = i
+		end
+		task.defer(function()
+			logBox.CanvasPosition = Vector2.new(0, logBox.AbsoluteCanvasSize.Y)
+		end)
+	end
+	onLogged = function()
+		if alive and overlay.Visible and pageLab.Visible then
+			renderLog()
+		end
+	end
+	onOpen.lab = function()
+		updateServer()
+		renderLog()
+	end
+
+	------------------------------------------------------------
+	-- ONE UPDATE LOOP FOR THE NEW TABS
+	------------------------------------------------------------
+	local tPlayers, tServer = 0, 0
+	track(RunService.Heartbeat:Connect(function(dt)
+		if spectating then
+			local hum = charParts(spectating)
+			local c = workspace.CurrentCamera
+			if not spectating.Parent or not hum or not c or c.CameraSubject ~= hum then
+				stopSpec()
+			end
+		end
+		if not (overlay.Visible and main.Visible) then
+			return
+		end
+		if pageLab.Visible then
+			updateRadar(dt)
+			tServer += dt
+			if tServer >= 1 then
+				tServer = 0
+				updateServer()
+			end
+		end
+		if pagePlayers.Visible then
+			tPlayers += dt
+			if tPlayers >= 0.25 then
+				tPlayers = 0
+				updateDetails()
+			end
+		end
+	end))
 
 	------------------------------------------------------------
 	-- PAGE SWITCHING + HEADER BUTTONS
 	------------------------------------------------------------
-	function showPage(name)
-		if openPage == name or name == nil then
-			overlay.Visible = false
-			openPage = nil
-			return
-		end
-		openPage = name
-		overlay.Visible = true
-		pageFiles.Visible = (name == "files")
-		pageCredits.Visible = (name == "credits")
-		if name == "files" then
-			scanPath(currentDir)
+	local pages = { files = pageFiles, keys = pageKeys, players = pagePlayers, lab = pageLab, credits = pageCredits }
+	local tabButtons = {}
+	local lastPage = "files"
+
+	local function cancelRebind()
+		if rebindTarget then
+			rebindTarget = nil
+			refreshKeys()
 		end
 	end
 
-	button(pageCredits, "CLOSE", UDim2.fromOffset(200, 318), UDim2.fromOffset(100, 28), function()
-		showPage(nil)
-	end)
-	button(pageFiles, "CLOSE", UDim2.fromOffset(388, 294), UDim2.fromOffset(100, 28), function()
-		showPage(nil)
-	end)
+	function showPage(name, force)
+		if name == nil or (openPage == name and not force) then
+			overlay.Visible = false
+			openPage = nil
+			cancelRebind()
+			return
+		end
+		if name ~= "keys" then
+			cancelRebind()
+		end
+		openPage = name
+		lastPage = name
+		overlay.Visible = true
+		for n, f in pairs(pages) do
+			f.Visible = (n == name)
+		end
+		for n, tb in pairs(tabButtons) do
+			tb.BackgroundColor3 = (n == name) and ON or DARK
+		end
+		if onOpen[name] then
+			onOpen[name]()
+		end
+	end
 
-	local fb = button(header, "FILES", UDim2.fromOffset(204, 6), UDim2.fromOffset(52, 22), function()
-		showPage("files")
+	local TABS = {
+		{ "files", "FILES" },
+		{ "keys", "KEYS" },
+		{ "players", "PLAYERS" },
+		{ "lab", "LAB" },
+		{ "credits", "CREDITS" },
+	}
+	for i, t in ipairs(TABS) do
+		local tb = button(overlay, t[2], UDim2.fromOffset(8 + (i - 1) * 90, 6), UDim2.fromOffset(86, 24), function()
+			showPage(t[1], true)
+		end)
+		tb.TextSize = 12
+		tabButtons[t[1]] = tb
+	end
+	local closeTab = button(overlay, "X", UDim2.new(1, -40, 0, 6), UDim2.fromOffset(32, 24), function()
+		showPage(nil)
 	end)
-	local cb = button(header, "CREDITS", UDim2.fromOffset(262, 6), UDim2.fromOffset(66, 22), function()
-		showPage("credits")
+	closeTab.TextSize = 12
+	local tabSep = new("Frame", {
+		Position = UDim2.fromOffset(8, 33),
+		Size = UDim2.new(1, -16, 0, 1),
+		BackgroundTransparency = 0.6,
+		BorderSizePixel = 0,
+	}, overlay)
+	acc(tabSep, "BackgroundColor3")
+
+	local menuBtn = button(header, "MENU", UDim2.fromOffset(204, 6), UDim2.fromOffset(60, 22), function()
+		showPage(lastPage)
 	end)
-	fb.TextSize = 12
-	cb.TextSize = 12
+	menuBtn.TextSize = 12
 end
 
 ----------------------------------------------------------------
@@ -1351,36 +2105,57 @@ end
 ----------------------------------------------------------------
 -- HOTKEYS
 ----------------------------------------------------------------
+local actions = {}
+actions.toggle = toggleUI
+actions.play = togglePlay
+actions.next = function()
+	nextTrack(1)
+end
+actions.prev = function()
+	nextTrack(-1)
+end
+actions.volup = function()
+	nudgeVolume(0.05)
+end
+actions.voldown = function()
+	nudgeVolume(-0.05)
+end
+actions.theme = function()
+	local n = themeIndex % #THEMES + 1
+	setTheme(n)
+	themeBtn.Text = "SUIT: " .. THEMES[n][1]
+	notify("Suit configuration: " .. THEMES[n][1], "info", 2)
+end
+local function openTab(name)
+	setUI(true)
+	showPage(name)
+end
+for _, name in ipairs({ "files", "keys", "players", "lab", "credits" }) do
+	actions[name] = function()
+		openTab(name)
+	end
+end
+actions.exit = unload
+
 track(UserInputService.InputBegan:Connect(function(input, processed)
-	if processed or input.UserInputType ~= Enum.UserInputType.Keyboard then
+	if input.UserInputType ~= Enum.UserInputType.Keyboard then
 		return
 	end
-	local k = input.KeyCode
-	if k == Enum.KeyCode.M then
-		toggleUI()
-	elseif k == Enum.KeyCode.P then
-		togglePlay()
-	elseif k == Enum.KeyCode.N then
-		nextTrack(1)
-	elseif k == Enum.KeyCode.B then
-		nextTrack(-1)
-	elseif k == Enum.KeyCode.Up then
-		nudgeVolume(0.05)
-	elseif k == Enum.KeyCode.Down then
-		nudgeVolume(-0.05)
-	elseif k == Enum.KeyCode.T then
-		local n = themeIndex % #THEMES + 1
-		setTheme(n)
-		themeBtn.Text = "SUIT: " .. THEMES[n][1]
-	notify("Suit configuration: " .. THEMES[n][1], "info", 2)
-	elseif k == Enum.KeyCode.F then
-		setUI(true)
-		showPage("files")
-	elseif k == Enum.KeyCode.C then
-		setUI(true)
-		showPage("credits")
-	elseif k == Enum.KeyCode.Delete then
-		unload()
+	if rebindTarget then
+		captureKey(input.KeyCode)
+		return
+	end
+	if processed then
+		return
+	end
+	for id, key in pairs(binds) do
+		if key == input.KeyCode then
+			local fn = actions[id]
+			if fn then
+				fn()
+			end
+			break
+		end
 	end
 end))
 
