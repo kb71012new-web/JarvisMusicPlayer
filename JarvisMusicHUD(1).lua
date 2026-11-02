@@ -796,6 +796,7 @@ do
 		BorderSizePixel = 0,
 		Visible = false,
 		ZIndex = 5,
+		Active = true, -- sink clicks so buttons hidden underneath can't be pressed
 	}, main)
 	acc(new("UIStroke", { Thickness = 1, Transparency = 0.5 }, overlay), "Color")
 
