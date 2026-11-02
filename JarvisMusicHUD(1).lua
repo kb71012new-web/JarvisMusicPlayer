@@ -12,7 +12,7 @@
       T          cycle suit theme
       F          open FILES import panel
       C          open CREDITS
-      K / L / Y / J  KEYS, PLAYERS, LAB and FUN tabs
+      K / L / Y / J / H  KEYS, PLAYERS, LAB, FUN and CHAT tabs
       (every key can be rebound in the KEYS tab; Backspace = None)
       Delete     EXIT (or click the red X) - fully unloads the script
 
@@ -772,6 +772,7 @@ local BIND_LIST = {
 	{ "players", "Open PLAYERS tab", Enum.KeyCode.L },
 	{ "lab", "Open LAB tab", Enum.KeyCode.Y },
 	{ "fun", "Open FUN tab", Enum.KeyCode.J },
+	{ "chat", "Open CHAT tab", Enum.KeyCode.H },
 	{ "credits", "Open CREDITS tab", Enum.KeyCode.C },
 	{ "exit", "Exit / unload script", Enum.KeyCode.Delete },
 }
@@ -781,6 +782,9 @@ for _, b in ipairs(BIND_LIST) do
 	binds[b[1]] = b[3]
 end
 local rebindTarget = nil
+local late = {} -- functions defined further down that the tab panels need
+local menuOpen = false -- true while a tab panel is showing
+local lockInMenus = true -- playback hotkeys pause while a tab panel is open
 local captureKey, refreshKeys
 
 do
@@ -1040,7 +1044,7 @@ do
 		line("REQUESTED BY", 116, 11, C, true)
 		line(player.DisplayName .. "  (@" .. player.Name .. ")", 130, 16)
 		line("MODULES", 160, 11, C, true)
-		line("ARC REACTOR  |  VISUALIZER  |  FILE BROWSER  |  KEYBINDS  |  PLAYER SCANNER  |  LAB + RADAR  |  FUN ZONE  |  NOTIFICATION CORE  |  SUIT THEMES", 174, 12, C, false, 34)
+		line("ARC REACTOR  |  VISUALIZER  |  FILE BROWSER  |  KEYBINDS  |  PLAYER SCANNER  |  LAB + RADAR  |  FUN ZONE  |  AI CHAT  |  NOTIFICATION CORE  |  SUIT THEMES", 174, 12, C, false, 34)
 		line("HOTKEYS", 214, 11, C, true)
 		line("Open the KEYS tab to view or rebind every shortcut.", 228, 12, C, false, 34)
 		line("powered by 100% fictional arc reactor technology.", 280, 11, C, true)
@@ -1054,6 +1058,7 @@ do
 	local pagePlayers = new("Frame", { Position = PAGE_POS, Size = PAGE_SIZE, BackgroundTransparency = 1, Visible = false }, overlay)
 	local pageLab = new("Frame", { Position = PAGE_POS, Size = PAGE_SIZE, BackgroundTransparency = 1, Visible = false }, overlay)
 	local pageFun = new("Frame", { Position = PAGE_POS, Size = PAGE_SIZE, BackgroundTransparency = 1, Visible = false }, overlay)
+	local pageChat = new("Frame", { Position = PAGE_POS, Size = PAGE_SIZE, BackgroundTransparency = 1, Visible = false }, overlay)
 	local function charParts(p)
 		local char = p and p.Character
 		if not char then
@@ -1149,6 +1154,13 @@ do
 			refreshKeys()
 			notify("Keybinds restored to defaults.", "ok", 2)
 		end)
+		local lockBtn
+		lockBtn = button(pageKeys, "MENU LOCK: ON", UDim2.fromOffset(170, 294), UDim2.fromOffset(170, 28), function()
+			lockInMenus = not lockInMenus
+			lockBtn.Text = lockInMenus and "MENU LOCK: ON" or "MENU LOCK: OFF"
+			notify(lockInMenus and "Playback keys pause while menus are open." or "Playback keys now work inside menus.", "info", 2.5)
+		end)
+		lockBtn.TextSize = 12
 		refreshKeys()
 	end
 
@@ -1973,10 +1985,351 @@ do
 		startBtn.TextSize = 13
 	end
 
+	do
+		----------------------------------------------------------
+		-- CHAT PAGE: talk to a Claude-powered J.A.R.V.I.S.
+		-- Needs an environment with a client-side request() function
+		-- and your own Anthropic API key (console.anthropic.com).
+		----------------------------------------------------------
+		local HttpService = game:GetService("HttpService")
+		local MODEL = "claude-haiku-5-5" -- any Claude model string works here
+		local API_URL = "https://api.anthropic.com/v1/messages"
+		local KEY_FILE = "jarvis_key.txt"
+		local httpRequest = env.request or env.http_request or (env.syn and env.syn.request) or (env.http and env.http.request)
+		local readFile, writeFile, delFile = env.readfile, env.writefile, env.delfile
+
+		local apiKey, remember, keyMode, busy = nil, false, false, false
+		local history = {}
+		local msgOrder = 0
+
+		if isFile and readFile then
+			local okf, exists = pcall(isFile, KEY_FILE)
+			if okf and exists then
+				local okr, content = pcall(readFile, KEY_FILE)
+				if okr and type(content) == "string" then
+					content = content:gsub("%s", "")
+					if content ~= "" then
+						apiKey, remember = content, true
+					end
+				end
+			end
+		end
+
+		label(pageChat, "// J.A.R.V.I.S. CHAT", UDim2.fromOffset(12, 8), UDim2.fromOffset(240, 20), 16)
+		local statusL = label(pageChat, "", UDim2.fromOffset(250, 11), UDim2.fromOffset(238, 16), 11, Enum.TextXAlignment.Right)
+		statusL.TextTransparency = 0.35
+		local function refreshStatus()
+			statusL.Text = MODEL .. "  |  key: " .. (apiKey and ("..." .. apiKey:sub(-4)) or "none")
+		end
+
+		local chatLog = new("ScrollingFrame", {
+			Position = UDim2.fromOffset(12, 34),
+			Size = UDim2.fromOffset(476, 214),
+			BackgroundColor3 = Color3.fromRGB(2, 8, 12),
+			BackgroundTransparency = 0.2,
+			BorderSizePixel = 0,
+			ScrollBarThickness = 3,
+			CanvasSize = UDim2.new(),
+			AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		}, pageChat)
+		acc(new("UIStroke", { Thickness = 1, Transparency = 0.6 }, chatLog), "Color")
+		new("UIListLayout", { Padding = UDim.new(0, 5), SortOrder = Enum.SortOrder.LayoutOrder }, chatLog)
+		new("UIPadding", { PaddingLeft = UDim.new(0, 6), PaddingTop = UDim.new(0, 4), PaddingRight = UDim.new(0, 6) }, chatLog)
+
+		local function scrollDown()
+			task.defer(function()
+				chatLog.CanvasPosition = Vector2.new(0, chatLog.AbsoluteCanvasSize.Y)
+			end)
+		end
+
+		local function addMsg(who, text, warnColor)
+			msgOrder += 1
+			local l = new("TextLabel", {
+				BackgroundTransparency = 1,
+				Size = UDim2.new(1, -8, 0, 0),
+				AutomaticSize = Enum.AutomaticSize.Y,
+				Font = Enum.Font.Code,
+				TextSize = 13,
+				TextWrapped = true,
+				TextXAlignment = L,
+				TextYAlignment = Enum.TextYAlignment.Top,
+				Text = who .. "> " .. text,
+				LayoutOrder = msgOrder,
+			}, chatLog)
+			if warnColor then
+				l.TextColor3 = Color3.fromRGB(255, 200, 70)
+			elseif who == "YOU" then
+				l.TextColor3 = Color3.fromRGB(225, 245, 255)
+			else
+				acc(l, "TextColor3")
+			end
+			scrollDown()
+			return l
+		end
+
+		local function clearLog()
+			for _, c in ipairs(chatLog:GetChildren()) do
+				if c:IsA("TextLabel") then
+					c:Destroy()
+				end
+			end
+		end
+
+		local inputBox = new("TextBox", {
+			Position = UDim2.fromOffset(12, 254),
+			Size = UDim2.fromOffset(396, 28),
+			BackgroundColor3 = DARK,
+			BackgroundTransparency = 0.3,
+			BorderSizePixel = 0,
+			Font = Enum.Font.Code,
+			TextSize = 13,
+			Text = "",
+			PlaceholderText = "talk to J.A.R.V.I.S.   (/help for commands)",
+			PlaceholderColor3 = Color3.fromRGB(110, 140, 155),
+			ClearTextOnFocus = false,
+			TextXAlignment = L,
+		}, pageChat)
+		new("UIPadding", { PaddingLeft = UDim.new(0, 8) }, inputBox)
+		acc(inputBox, "TextColor3")
+		acc(new("UIStroke", { Thickness = 1, Transparency = 0.5 }, inputBox), "Color")
+
+		local function systemPrompt()
+			local trackName = tracks[current] and tracks[current].name or "nothing"
+			return "You are J.A.R.V.I.S., a witty, polite AI butler built into an Iron Man style music HUD inside a Roblox game. "
+				.. "The user's name is " .. player.DisplayName .. ". Keep replies short (under 60 words), plain text only, no markdown. "
+				.. "Music status: " .. trackName .. (sound.IsPlaying and " (playing)." or " (paused/stopped).")
+				.. " You cannot control the game or the music yourself; if asked, point them to the slash commands /next, /prev, /pause, /play and /vol N."
+		end
+
+		local function typeOut(label_, who, text)
+			task.spawn(function()
+				for i = 1, #text, 3 do
+					if not alive then
+						return
+					end
+					label_.Text = who .. "> " .. text:sub(1, i)
+					scrollDown()
+					task.wait(0.01)
+				end
+				label_.Text = who .. "> " .. text
+				scrollDown()
+			end)
+		end
+
+		local function sendToClaude(text)
+			busy = true
+			table.insert(history, { role = "user", content = text })
+			while #history > 16 do
+				table.remove(history, 1)
+			end
+			while history[1] and history[1].role ~= "user" do
+				table.remove(history, 1)
+			end
+			local thinking = addMsg("JARVIS", "thinking...")
+			local key = apiKey
+			task.spawn(function()
+				local ok, res = pcall(httpRequest, {
+					Url = API_URL,
+					Method = "POST",
+					Headers = {
+						["x-api-key"] = key,
+						["anthropic-version"] = "2023-06-01",
+						["content-type"] = "application/json",
+					},
+					Body = HttpService:JSONEncode({
+						model = MODEL,
+						max_tokens = 300,
+						system = systemPrompt(),
+						messages = history,
+					}),
+				})
+				if not alive then
+					return
+				end
+				local reply, failed
+				if not ok or type(res) ~= "table" then
+					reply, failed = "request failed: " .. tostring(res), true
+				else
+					local status = res.StatusCode or res.status_code or 0
+					local decoded
+					pcall(function()
+						decoded = HttpService:JSONDecode(res.Body)
+					end)
+					if status == 200 and decoded and type(decoded.content) == "table" then
+						local parts = {}
+						for _, b in ipairs(decoded.content) do
+							if b.type == "text" then
+								table.insert(parts, b.text)
+							end
+						end
+						reply = table.concat(parts):gsub("^%s+", ""):gsub("%s+$", "")
+						if reply == "" then
+							reply, failed = "(empty reply)", true
+						end
+					else
+						reply, failed = (decoded and decoded.error and decoded.error.message) or ("HTTP " .. tostring(status)), true
+						if status == 401 then
+							reply = "that API key was rejected (401). Use SET KEY to enter a valid one."
+						end
+					end
+				end
+				if failed then
+					table.remove(history) -- drop the unanswered user turn so they can retry
+					thinking.Text = "JARVIS> " .. reply
+					thinking.TextColor3 = Color3.fromRGB(255, 200, 70)
+				else
+					table.insert(history, { role = "assistant", content = reply })
+					typeOut(thinking, "JARVIS", reply)
+				end
+				busy = false
+			end)
+		end
+
+		local function runCommand(text)
+			local c, arg = text:match("^/(%a+)%s*(.*)$")
+			if not c then
+				return false
+			end
+			c = c:lower()
+			if c == "next" then
+				nextTrack(1)
+			elseif c == "prev" then
+				nextTrack(-1)
+			elseif c == "pause" then
+				if sound.IsPlaying then
+					togglePlay()
+				end
+			elseif c == "play" then
+				if not sound.IsPlaying then
+					togglePlay()
+				end
+			elseif c == "vol" then
+				local n = tonumber(arg)
+				if not n then
+					addMsg("JARVIS", "usage: /vol 0-100", true)
+					return true
+				end
+				late.nudgeVolume(math.clamp(n / 100, 0, 1) - sound.Volume)
+			elseif c == "clear" then
+				history = {}
+				clearLog()
+				addMsg("JARVIS", "memory wiped, sir.")
+				return true
+			elseif c == "help" then
+				addMsg("JARVIS", "commands: /play /pause /next /prev /vol N /clear. Anything else goes to me.")
+				return true
+			else
+				addMsg("JARVIS", "unknown command. Try /help.", true)
+				return true
+			end
+			addMsg("JARVIS", "done, sir.")
+			return true
+		end
+
+		local function submit()
+			local text = inputBox.Text:gsub("^%s+", ""):gsub("%s+$", "")
+			if text == "" then
+				return
+			end
+			if keyMode then
+				if text:sub(1, 3) ~= "sk-" then
+					notify("That doesn't look like an Anthropic API key.", "warn", 3)
+					return
+				end
+				apiKey, keyMode = text, false
+				inputBox.Text = ""
+				inputBox.PlaceholderText = "talk to J.A.R.V.I.S.   (/help for commands)"
+				if remember and writeFile then
+					pcall(writeFile, KEY_FILE, apiKey)
+				end
+				refreshStatus()
+				addMsg("JARVIS", "key accepted (ends in " .. apiKey:sub(-4) .. "). I'm all ears, sir.")
+				return
+			end
+			if runCommand(text) then
+				inputBox.Text = ""
+				return
+			end
+			if not httpRequest then
+				addMsg("JARVIS", "this environment has no client-side HTTP, so I can't reach my brain.", true)
+				return
+			end
+			if not apiKey then
+				addMsg("JARVIS", "press SET KEY and paste your Anthropic API key first.", true)
+				return
+			end
+			if busy then
+				notify("One moment, still thinking...", "warn", 1.5)
+				return
+			end
+			inputBox.Text = ""
+			addMsg("YOU", text)
+			sendToClaude(text)
+		end
+		inputBox.FocusLost:Connect(function(enter)
+			if enter then
+				submit()
+			end
+		end)
+		button(pageChat, "SEND", UDim2.fromOffset(414, 254), UDim2.fromOffset(74, 28), submit).TextSize = 12
+
+		button(pageChat, "SET KEY", UDim2.fromOffset(12, 290), UDim2.fromOffset(86, 28), function()
+			keyMode = true
+			inputBox.Text = ""
+			inputBox.PlaceholderText = "paste your API key (sk-ant-...) and press Enter"
+			inputBox:CaptureFocus()
+		end).TextSize = 12
+
+		local rememberBtn
+		rememberBtn = button(pageChat, "REMEMBER: OFF", UDim2.fromOffset(104, 290), UDim2.fromOffset(136, 28), function()
+			if not writeFile then
+				notify("File saving isn't available here.", "warn", 2.5)
+				return
+			end
+			remember = not remember
+			rememberBtn.Text = remember and "REMEMBER: ON" or "REMEMBER: OFF"
+			if remember then
+				if apiKey then
+					pcall(writeFile, KEY_FILE, apiKey)
+				end
+				notify("Key is saved as plain text in your workspace folder.", "warn", 3.5)
+			else
+				if delFile and isFile and isFile(KEY_FILE) then
+					pcall(delFile, KEY_FILE)
+				elseif writeFile then
+					pcall(writeFile, KEY_FILE, "")
+				end
+				notify("Saved key removed.", "ok", 2)
+			end
+		end)
+		rememberBtn.TextSize = 12
+		if remember then
+			rememberBtn.Text = "REMEMBER: ON"
+		end
+
+		button(pageChat, "CLEAR", UDim2.fromOffset(246, 290), UDim2.fromOffset(74, 28), function()
+			history = {}
+			clearLog()
+			addMsg("JARVIS", "memory wiped, sir.")
+		end).TextSize = 12
+
+		local costNote = label(pageChat, "uses your own Anthropic API credits", UDim2.fromOffset(326, 296), UDim2.fromOffset(162, 16), 10, Enum.TextXAlignment.Right)
+		costNote.TextTransparency = 0.5
+
+		refreshStatus()
+		if not httpRequest then
+			addMsg("JARVIS", "No client-side HTTP here, so I can't call my brain. Slash commands still work. Try /help.", true)
+		elseif not apiKey then
+			addMsg("JARVIS", "Press SET KEY and paste your Anthropic API key to wake me up. Slash commands work without one.")
+		else
+			addMsg("JARVIS", "Online and at your service, " .. player.DisplayName .. ".")
+		end
+	end
+
 	------------------------------------------------------------
 	-- PAGE SWITCHING + HEADER BUTTONS
 	------------------------------------------------------------
-	local pages = { files = pageFiles, keys = pageKeys, players = pagePlayers, lab = pageLab, fun = pageFun, credits = pageCredits }
+	local pages = { files = pageFiles, keys = pageKeys, players = pagePlayers, lab = pageLab, fun = pageFun, chat = pageChat, credits = pageCredits }
 	local tabButtons = {}
 	local lastPage = "files"
 
@@ -1991,6 +2344,7 @@ do
 		if name == nil or (openPage == name and not force) then
 			overlay.Visible = false
 			openPage = nil
+			menuOpen = false
 			cancelRebind()
 			return
 		end
@@ -2000,6 +2354,7 @@ do
 		openPage = name
 		lastPage = name
 		overlay.Visible = true
+		menuOpen = true
 		for n, f in pairs(pages) do
 			f.Visible = (n == name)
 		end
@@ -2017,13 +2372,14 @@ do
 		{ "players", "PLAYERS" },
 		{ "lab", "LAB" },
 		{ "fun", "FUN" },
+		{ "chat", "CHAT" },
 		{ "credits", "CREDITS" },
 	}
 	for i, t in ipairs(TABS) do
-		local tb = button(overlay, t[2], UDim2.fromOffset(8 + (i - 1) * 72, 6), UDim2.fromOffset(68, 24), function()
+		local tb = button(overlay, t[2], UDim2.fromOffset(8 + (i - 1) * 64, 6), UDim2.fromOffset(60, 24), function()
 			showPage(t[1], true)
 		end)
-		tb.TextSize = 12
+		tb.TextSize = 11
 		tabButtons[t[1]] = tb
 	end
 	local closeTab = button(overlay, "X", UDim2.new(1, -40, 0, 6), UDim2.fromOffset(32, 24), function()
@@ -2090,6 +2446,7 @@ local function nudgeVolume(d)
 	volume.force(v)
 	volPct.Text = math.floor(v * 100) .. "%"
 end
+late.nudgeVolume = nudgeVolume
 
 ----------------------------------------------------------------
 -- INPUT ROW + PLAYLIST
@@ -2407,12 +2764,19 @@ local function openTab(name)
 	setUI(true)
 	showPage(name)
 end
-for _, name in ipairs({ "files", "keys", "players", "lab", "fun", "credits" }) do
+for _, name in ipairs({ "files", "keys", "players", "lab", "fun", "chat", "credits" }) do
 	actions[name] = function()
 		openTab(name)
 	end
 end
 actions.exit = unload
+
+-- these always work; everything else (play, next, volume, theme) pauses while a menu is open
+local ALWAYS = {
+	toggle = true, files = true, keys = true, players = true,
+	lab = true, fun = true, chat = true, credits = true, exit = true,
+}
+local lastLockNote = 0
 
 track(UserInputService.InputBegan:Connect(function(input, processed)
 	if input.UserInputType ~= Enum.UserInputType.Keyboard then
@@ -2427,6 +2791,13 @@ track(UserInputService.InputBegan:Connect(function(input, processed)
 	end
 	for id, key in pairs(binds) do
 		if key ~= Enum.KeyCode.Unknown and key == input.KeyCode then
+			if lockInMenus and menuOpen and uiOpen and not ALWAYS[id] then
+				if os.clock() - lastLockNote > 3 then
+					lastLockNote = os.clock()
+					notify("A menu is open. Close it (X) to use playback keys.", "warn", 2)
+				end
+				break
+			end
 			local fn = actions[id]
 			if fn then
 				fn()
