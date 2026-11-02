@@ -10,7 +10,7 @@
       N / B      next / previous track
       Up / Down  volume
       T          cycle suit theme
-      F          open FILES import panel
+      F          open FILES (all tabs open in a separate SYSTEMS panel)
       C          open CREDITS
       K / L / Y / J / H  KEYS, PLAYERS, LAB, FUN and CHAT tabs
       (every key can be rebound in the KEYS tab; Backspace = None)
@@ -143,20 +143,20 @@ acc(new("UIStroke", { Thickness = 1.5, Transparency = 0.15 }, main), "Color")
 new("UICorner", { CornerRadius = UDim.new(0, 4) }, main)
 
 -- corner brackets
-local function bracket(fx, fy)
+local function bracket(fx, fy, parent)
 	local ax, ay = fx and 1 or 0, fy and 1 or 0
 	local h = new("Frame", {
 		Size = UDim2.fromOffset(22, 3),
 		AnchorPoint = Vector2.new(ax, ay),
 		Position = UDim2.new(ax, 0, ay, 0),
 		BorderSizePixel = 0,
-	}, main)
+	}, parent or main)
 	local v = new("Frame", {
 		Size = UDim2.fromOffset(3, 22),
 		AnchorPoint = Vector2.new(ax, ay),
 		Position = UDim2.new(ax, 0, ay, 0),
 		BorderSizePixel = 0,
-	}, main)
+	}, parent or main)
 	acc(h, "BackgroundColor3")
 	acc(v, "BackgroundColor3")
 end
@@ -271,6 +271,7 @@ end
 ----------------------------------------------------------------
 local notifHolder = new("Frame", {
 	Name = "Notifs",
+	ZIndex = 20,
 	AnchorPoint = Vector2.new(0.5, 0),
 	Position = UDim2.new(0.5, 0, 0, 12),
 	Size = UDim2.fromOffset(360, 400),
@@ -722,6 +723,10 @@ function unload()
 	table.clear(conns)
 	pcall(function()
 		TweenService:Create(main, TweenInfo.new(0.25), { GroupTransparency = 1 }):Play()
+		local m = gui:FindFirstChild("Menu")
+		if m then
+			TweenService:Create(m, TweenInfo.new(0.25), { GroupTransparency = 1 }):Play()
+		end
 	end)
 	task.delay(0.3, function()
 		pcall(function()
@@ -783,21 +788,85 @@ for _, b in ipairs(BIND_LIST) do
 end
 local rebindTarget = nil
 local late = {} -- functions defined further down that the tab panels need
-local menuOpen = false -- true while a tab panel is showing
-local lockInMenus = true -- playback hotkeys pause while a tab panel is open
 local captureKey, refreshKeys
 
 do
+	local MENU_W, MENU_H = 520, 410
+	local menu = new("CanvasGroup", {
+		Name = "Menu",
+		Size = UDim2.fromOffset(MENU_W, MENU_H),
+		BackgroundColor3 = Color3.fromRGB(4, 12, 20),
+		BackgroundTransparency = 0.12,
+		BorderSizePixel = 0,
+		GroupTransparency = 1,
+		Visible = false,
+		Active = true,
+	}, gui)
+	acc(new("UIStroke", { Thickness = 1.5, Transparency = 0.15 }, menu), "Color")
+	new("UICorner", { CornerRadius = UDim.new(0, 4) }, menu)
+	local menuScale = new("UIScale", { Scale = 0.92 }, menu)
+	bracket(false, false, menu)
+	bracket(true, false, menu)
+	bracket(false, true, menu)
+	bracket(true, true, menu)
+
+	local mScan = new("Frame", {
+		Size = UDim2.new(1, 0, 0, 2),
+		BackgroundTransparency = 0.85,
+		BorderSizePixel = 0,
+		ZIndex = 10,
+	}, menu)
+	acc(mScan, "BackgroundColor3")
+	TweenService:Create(mScan, TweenInfo.new(4, Enum.EasingStyle.Linear, Enum.EasingDirection.In, -1), {
+		Position = UDim2.fromScale(0, 1),
+	}):Play()
+
+	local mHeader = new("Frame", { Size = UDim2.new(1, 0, 0, 34), BackgroundTransparency = 1 }, menu)
+	label(mHeader, "J.A.R.V.I.S. // SYSTEMS", UDim2.fromOffset(14, 0), UDim2.fromOffset(300, 34), 15)
+	local mDivider = new("Frame", {
+		Position = UDim2.fromOffset(10, 34),
+		Size = UDim2.new(1, -20, 0, 1),
+		BackgroundTransparency = 0.5,
+		BorderSizePixel = 0,
+	}, menu)
+	acc(mDivider, "BackgroundColor3")
+	local mClose = button(mHeader, "X", UDim2.new(1, -10, 0, 17), UDim2.fromOffset(34, 22), function()
+		showPage(nil)
+	end)
+	mClose.AnchorPoint = Vector2.new(1, 0.5)
+
+	-- remembers where the panel was last placed / dragged
+	local menuHomePos, userMoved = UDim2.fromOffset(0, 0), false
+	do
+		local dragging, startPos, startMouse
+		mHeader.InputBegan:Connect(function(i)
+			if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+				dragging = true
+				startPos = menu.Position
+				startMouse = i.Position
+			end
+		end)
+		track(UserInputService.InputChanged:Connect(function(i)
+			if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+				local d = i.Position - startMouse
+				menu.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
+				menuHomePos = menu.Position
+				userMoved = true
+			end
+		end))
+		track(UserInputService.InputEnded:Connect(function(i)
+			if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+				dragging = false
+			end
+		end))
+	end
+
 	local overlay = new("Frame", {
 		Position = UDim2.fromOffset(10, 38),
 		Size = UDim2.new(1, -20, 1, -46),
-		BackgroundColor3 = Color3.fromRGB(4, 12, 20),
-		BackgroundTransparency = 0.02,
+		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
-		Visible = false,
-		ZIndex = 5,
-		Active = true, -- sink clicks so buttons hidden underneath can't be pressed
-	}, main)
+	}, menu)
 	acc(new("UIStroke", { Thickness = 1, Transparency = 0.5 }, overlay), "Color")
 
 	local pageFiles = new("Frame", { Position = UDim2.fromOffset(0, 34), Size = UDim2.new(1, 0, 1, -34), BackgroundTransparency = 1, Visible = false }, overlay)
@@ -1155,13 +1224,6 @@ do
 			refreshKeys()
 			notify("Keybinds restored to defaults.", "ok", 2)
 		end)
-		local lockBtn
-		lockBtn = button(pageKeys, "MENU LOCK: ON", UDim2.fromOffset(170, 294), UDim2.fromOffset(170, 28), function()
-			lockInMenus = not lockInMenus
-			lockBtn.Text = lockInMenus and "MENU LOCK: ON" or "MENU LOCK: OFF"
-			notify(lockInMenus and "Playback keys pause while menus are open." or "Playback keys now work inside menus.", "info", 2.5)
-		end)
-		lockBtn.TextSize = 12
 		refreshKeys()
 	end
 
@@ -1451,7 +1513,7 @@ do
 					stopSpec()
 				end
 			end
-			if not (overlay.Visible and main.Visible and pagePlayers.Visible) then
+			if not (menu.Visible and pagePlayers.Visible) then
 				return
 			end
 			tPlayers += dt
@@ -1719,7 +1781,7 @@ do
 			end)
 		end
 		onLogged = function()
-			if alive and overlay.Visible and pageLab.Visible then
+			if alive and menu.Visible and pageLab.Visible then
 				renderLog()
 			end
 		end
@@ -1730,7 +1792,7 @@ do
 
 		local tServer = 0
 		track(RunService.Heartbeat:Connect(function(dt)
-			if not (overlay.Visible and main.Visible and pageLab.Visible) then
+			if not (menu.Visible and pageLab.Visible) then
 				return
 			end
 			updateRadar(dt)
@@ -2341,11 +2403,79 @@ do
 		end
 	end
 
+	local menuShown, menuToken = false, 0
+	local menuSlide = Vector2.new(40, 0)
+
+	-- put the panel beside the player if there's room (right, then left), else on top
+	local function computeHome()
+		local screen = gui.AbsoluteSize
+		local rx, ry, rw
+		if main.Visible then
+			rx, ry, rw = main.AbsolutePosition.X, main.AbsolutePosition.Y, main.AbsoluteSize.X
+		else
+			rw = MENU_W
+			rx, ry = (screen.X - MENU_W) / 2, (screen.Y - MENU_H) / 2
+		end
+		local x, y, slide
+		if rx + rw + 12 + MENU_W <= screen.X then
+			x, y, slide = rx + rw + 12, ry, Vector2.new(-40, 0)
+		elseif rx - 12 - MENU_W >= 0 then
+			x, y, slide = rx - 12 - MENU_W, ry, Vector2.new(40, 0)
+		else
+			x, y, slide = rx + 28, ry + 28, Vector2.new(0, 30)
+		end
+		x = math.clamp(x, 0, math.max(0, screen.X - MENU_W))
+		y = math.clamp(y, 0, math.max(0, screen.Y - MENU_H))
+		return UDim2.fromOffset(x, y), slide
+	end
+
+	local function slidOff()
+		return UDim2.new(menuHomePos.X.Scale, menuHomePos.X.Offset + menuSlide.X, menuHomePos.Y.Scale, menuHomePos.Y.Offset + menuSlide.Y)
+	end
+
+	local function openMenu()
+		if menuShown then
+			return
+		end
+		menuShown = true
+		menuToken += 1
+		if not userMoved then
+			menuHomePos, menuSlide = computeHome()
+		else
+			menuSlide = Vector2.new(0, 24)
+		end
+		if not menu.Visible then
+			menu.Position = slidOff()
+			menuScale.Scale = 0.92
+			menu.GroupTransparency = 1
+			menu.Visible = true
+		end
+		TweenService:Create(menu, TweenInfo.new(0.5, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), { Position = menuHomePos }):Play()
+		TweenService:Create(menu, TweenInfo.new(0.3, Enum.EasingStyle.Quad), { GroupTransparency = 0 }):Play()
+		TweenService:Create(menuScale, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+	end
+
+	local function closeMenu()
+		if not menuShown then
+			return
+		end
+		menuShown = false
+		menuToken += 1
+		local my = menuToken
+		TweenService:Create(menu, TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.In), { Position = slidOff() }):Play()
+		TweenService:Create(menu, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { GroupTransparency = 1 }):Play()
+		TweenService:Create(menuScale, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.In), { Scale = 0.92 }):Play()
+		task.delay(0.38, function()
+			if my == menuToken and not menuShown then
+				menu.Visible = false
+			end
+		end)
+	end
+
 	function showPage(name, force)
 		if name == nil or (openPage == name and not force) then
-			overlay.Visible = false
 			openPage = nil
-			menuOpen = false
+			closeMenu()
 			cancelRebind()
 			return
 		end
@@ -2354,14 +2484,13 @@ do
 		end
 		openPage = name
 		lastPage = name
-		overlay.Visible = true
-		menuOpen = true
 		for n, f in pairs(pages) do
 			f.Visible = (n == name)
 		end
 		for n, tb in pairs(tabButtons) do
 			tb.BackgroundColor3 = (n == name) and ON or DARK
 		end
+		openMenu()
 		if onOpen[name] then
 			onOpen[name]()
 		end
@@ -2377,16 +2506,12 @@ do
 		{ "credits", "CREDITS" },
 	}
 	for i, t in ipairs(TABS) do
-		local tb = button(overlay, t[2], UDim2.fromOffset(8 + (i - 1) * 64, 6), UDim2.fromOffset(60, 24), function()
+		local tb = button(overlay, t[2], UDim2.fromOffset(8 + (i - 1) * 70, 6), UDim2.fromOffset(66, 24), function()
 			showPage(t[1], true)
 		end)
-		tb.TextSize = 11
+		tb.TextSize = 12
 		tabButtons[t[1]] = tb
 	end
-	local closeTab = button(overlay, "X", UDim2.new(1, -40, 0, 6), UDim2.fromOffset(32, 24), function()
-		showPage(nil)
-	end)
-	closeTab.TextSize = 12
 	local tabSep = new("Frame", {
 		Position = UDim2.fromOffset(8, 33),
 		Size = UDim2.new(1, -16, 0, 1),
@@ -2762,7 +2887,6 @@ actions.theme = function()
 	notify("Suit configuration: " .. THEMES[n][1], "info", 2)
 end
 local function openTab(name)
-	setUI(true)
 	showPage(name)
 end
 for _, name in ipairs({ "files", "keys", "players", "lab", "fun", "chat", "credits" }) do
@@ -2771,13 +2895,6 @@ for _, name in ipairs({ "files", "keys", "players", "lab", "fun", "chat", "credi
 	end
 end
 actions.exit = unload
-
--- these always work; everything else (play, next, volume, theme) pauses while a menu is open
-local ALWAYS = {
-	toggle = true, files = true, keys = true, players = true,
-	lab = true, fun = true, chat = true, credits = true, exit = true,
-}
-local lastLockNote = 0
 
 track(UserInputService.InputBegan:Connect(function(input, processed)
 	if input.UserInputType ~= Enum.UserInputType.Keyboard then
@@ -2792,13 +2909,6 @@ track(UserInputService.InputBegan:Connect(function(input, processed)
 	end
 	for id, key in pairs(binds) do
 		if key ~= Enum.KeyCode.Unknown and key == input.KeyCode then
-			if lockInMenus and menuOpen and uiOpen and not ALWAYS[id] then
-				if os.clock() - lastLockNote > 3 then
-					lastLockNote = os.clock()
-					notify("A menu is open. Close it (X) to use playback keys.", "warn", 2)
-				end
-				break
-			end
 			local fn = actions[id]
 			if fn then
 				fn()
